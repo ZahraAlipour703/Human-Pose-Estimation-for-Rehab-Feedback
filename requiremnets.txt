@@ -1,0 +1,13 @@
+pip install torch torchvision
+pip install monai
+pip install opencv-python
+pip install matplotlib
+pip install numpy
+pip install pandas
+pip install scikit-image
+pip install scikit-learn
+pip install tqdm
+pip install pyyaml
+pip install nibabel
+pip install simpleitk
+pip install jupyter
