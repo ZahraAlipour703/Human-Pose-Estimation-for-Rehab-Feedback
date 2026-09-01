@@ -1,11 +1,12 @@
 """
-Biceps curl assessment.
+Calf raise exercise checker.
 
 Primary signal:
-    SHOULDER -> ELBOW -> WRIST
+    normalized heel elevation relative to the ankle.
 
-Secondary signal:
-    normalized shoulder displacement.
+The implementation is intended for computer-vision
+exercise analysis. Thresholds are engineering parameters,
+not clinically validated reference values.
 """
 
 from __future__ import annotations
@@ -15,7 +16,8 @@ import time
 from exercises.base import BaseExerciseChecker
 
 
-class BicepsCurlChecker(BaseExerciseChecker):
+class CalfRaiseChecker(BaseExerciseChecker):
+    """Detect repeated calf raises."""
 
     def __init__(
         self,
@@ -23,36 +25,46 @@ class BicepsCurlChecker(BaseExerciseChecker):
         logger=None,
     ):
         super().__init__(
-            "biceps_curl",
-            config,
+            "calf_raise",
+            config or {},
             logger,
         )
 
-        c = self.config
+        config = config or {}
 
-        self.flexion_angle = float(
-            c.get("flexion_angle", 55)
+        self.rise_threshold = float(
+            config.get(
+                "rise_threshold",
+                0.025,
+            )
         )
 
-        self.extension_angle = float(
-            c.get("extension_angle", 155)
+        self.return_threshold = float(
+            config.get(
+                "return_threshold",
+                0.010,
+            )
         )
 
-        self.tolerance = float(
-            c.get("tolerance_deg", 12)
-        )
-
-        self.max_shoulder_motion = float(
-            c.get("max_shoulder_motion", 0.06)
+        self.smoothing_window = int(
+            config.get(
+                "smoothing_window",
+                5,
+            )
         )
 
         self.smoothers = self.create_smoothers(
-            c.get("smoothing_window", 5)
+            self.smoothing_window
         )
 
+        self.baseline_ratio = {
+            "LEFT": None,
+            "RIGHT": None,
+        }
+
         self.stage = {
-            "LEFT": "extended",
-            "RIGHT": "extended",
+            "LEFT": "down",
+            "RIGHT": "down",
         }
 
         self.reps = {
@@ -60,26 +72,43 @@ class BicepsCurlChecker(BaseExerciseChecker):
             "RIGHT": 0,
         }
 
-        self.baseline_shoulder = {
-            "LEFT": None,
-            "RIGHT": None,
-        }
+    def _heel_to_ankle_ratio(
+        self,
+        landmarks,
+        side,
+    ):
+        """
+        Estimate heel-to-ankle vertical separation
+        normalized by lower-leg length.
+        """
 
-        self.baseline_scale = {
-            "LEFT": None,
-            "RIGHT": None,
-        }
+        knee = landmarks[
+            f"{side}_KNEE"
+        ]
 
-    def _scale(self, lm, side):
-        elbow = lm[f"{side}_ELBOW"]
-        shoulder = lm[f"{side}_SHOULDER"]
+        ankle = landmarks[
+            f"{side}_ANKLE"
+        ]
 
-        return max(
+        heel = landmarks[
+            f"{side}_HEEL"
+        ]
+
+        lower_leg_length = max(
             self.distance(
-                shoulder,
-                elbow,
+                knee,
+                ankle,
             ),
             1e-6,
+        )
+
+        vertical_separation = (
+            heel[1] - ankle[1]
+        )
+
+        return (
+            vertical_separation
+            / lower_leg_length
         )
 
     def update(
@@ -101,109 +130,90 @@ class BicepsCurlChecker(BaseExerciseChecker):
         if not lm:
             return self.no_pose_result()
 
-        per_side = {}
         feedback = []
+        per_side = {}
 
         for side in self.selected_sides():
 
-            names = [
-                f"{side}_SHOULDER",
-                f"{side}_ELBOW",
-                f"{side}_WRIST",
+            required = [
+                f"{side}_KNEE",
+                f"{side}_ANKLE",
+                f"{side}_HEEL",
             ]
 
             if not self.has_points(
                 lm,
-                names,
+                required,
             ):
+
                 per_side[side] = {
                     "status": "no_pose",
-                    "angle": None,
+                    "rise": None,
                     "reps": self.reps[side],
                     "stage": self.stage[side],
                     "reasons": [],
                 }
+
                 continue
 
-            shoulder = lm[f"{side}_SHOULDER"]
-            elbow = lm[f"{side}_ELBOW"]
-            wrist = lm[f"{side}_WRIST"]
+            ratio = (
+                self._heel_to_ankle_ratio(
+                    lm,
+                    side,
+                )
+            )
 
-            angle = self.smoothers[
+            baseline = (
+                self.baseline_ratio[side]
+            )
+
+            if baseline is None:
+
+                self.baseline_ratio[
+                    side
+                ] = ratio
+
+                baseline = ratio
+
+            # Heel moves upward => y becomes smaller.
+            rise = max(
+                0.0,
+                baseline - ratio,
+            )
+
+            rise = self.smoothers[
                 side
-            ].update(
-                self.angle(
-                    shoulder,
-                    elbow,
-                    wrist,
-                )
+            ].update(rise)
+
+            previous_stage = (
+                self.stage[side]
             )
 
             if (
-                self.baseline_shoulder[side]
-                is None
+                rise
+                >= self.rise_threshold
             ):
-                self.baseline_shoulder[
-                    side
-                ] = shoulder
 
-            if (
-                self.baseline_scale[side]
-                is None
+                self.stage[side] = "up"
+
+            elif (
+                rise
+                <= self.return_threshold
             ):
-                self.baseline_scale[
-                    side
-                ] = self._scale(lm, side)
 
-            shoulder_displacement = (
-                self.distance(
-                    shoulder,
-                    self.baseline_shoulder[side],
-                )
-                / self.baseline_scale[side]
-            )
-
-            reasons = []
-
-            if (
-                shoulder_displacement
-                > self.max_shoulder_motion
-            ):
-                reasons.append(
-                    "Keep upper arm stable"
-                )
-
-            previous = self.stage[side]
-
-            at_flexion = (
-                angle
-                <= (
-                    self.flexion_angle
-                    + self.tolerance
-                )
-            )
-
-            at_extension = (
-                angle
-                >= (
-                    self.extension_angle
-                    - self.tolerance
-                )
-            )
-
-            if at_flexion:
-                self.stage[side] = "flexed"
-
-            elif at_extension:
-                self.stage[side] = "extended"
+                self.stage[side] = "down"
 
             else:
+
                 self.stage[side] = "moving"
 
+            # One repetition:
+            # UP -> DOWN.
             if (
-                previous == "flexed"
-                and self.stage[side] == "extended"
+                previous_stage == "up"
+                and self.stage[side] == "down"
             ):
+
                 self.reps[side] += 1
 
                 self.log(
@@ -214,26 +224,20 @@ class BicepsCurlChecker(BaseExerciseChecker):
                 )
 
             per_side[side] = {
-                "status": (
-                    "good"
-                    if not reasons
-                    else "form_warning"
-                ),
-                "angle": float(angle),
-                "shoulder_displacement": float(
-                    shoulder_displacement
-                ),
+                "status": "good",
+                "rise": float(rise),
                 "reps": self.reps[side],
                 "stage": self.stage[side],
-                "reasons": reasons,
+                "reasons": [],
             }
-
-            feedback.extend(reasons)
 
         return self.standard_result(
             status="active",
-            reps=max(self.reps.values()),
+            reps=max(
+                self.reps.values()
+            ),
             stage="active",
             feedback=feedback,
+            metrics={},
             per_side=per_side,
         )
