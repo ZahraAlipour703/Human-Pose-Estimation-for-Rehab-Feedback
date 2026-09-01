@@ -1,4 +1,13 @@
 {
+  "mini_squat": {
+    "side": "both",
+    "down_knee_angle": 85,
+    "up_knee_angle": 155,
+    "tolerance_deg": 12,
+    "max_torso_tilt_deg": 30,
+    "smoothing_window": 5
+  },
+
   "shoulder_flexion": {
     "side": "both",
     "target_angle_up": 160,
@@ -6,39 +15,40 @@
     "tolerance_deg": 15,
     "hold_time_sec": 1.5,
     "smoothing_window": 5,
-    "min_moving_angle": 8,
     "max_elbow_flexion_deg": 20,
     "max_torso_tilt_deg": 12
   },
-  
-  "arm_raise_and_carry": {
-    "mode": "combined",              
+
+  "shoulder_abduction": {
     "side": "both",
     "target_angle_up": 160,
-    "target_angle_down": 40,
-    "tolerance_deg": 12,
+    "target_angle_down": 20,
+    "tolerance_deg": 18,
     "hold_time_sec": 1.5,
-    "smoothing_window": 5,
-    "min_moving_angle": 8,
+    "smoothing_window": 7,
     "max_elbow_flexion_deg": 20,
-    "max_torso_tilt_deg": 12,
-    "carry_duration_sec": 20,
-    "carry_min_ok_fraction": 0.9
+    "max_torso_tilt_deg": 12
   },
-  "shoulder_abduction": {
-  "side": "both",
-  "target_angle_up": 160,
-  "target_angle_down": 20,
-  "tolerance_deg": 18,
-  "hold_time_sec": 1.5,
-  "smoothing_window": 7,
-  "min_moving_angle": 8,
-  "max_elbow_flexion_deg": 20,
-  "max_torso_tilt_deg": 12
-}
 
-"BicepsCurlChecker" is not accessedPylance
-(import) BicepsCurlChecker: Any
+  "biceps_curl": {
+    "side": "both",
+    "flexion_angle": 55,
+    "extension_angle": 155,
+    "tolerance_deg": 12,
+    "max_shoulder_motion": 0.06,
+    "smoothing_window": 5
+  },
 
+  "calf_raise": {
+    "side": "both",
+    "rise_threshold": 0.025,
+    "return_threshold": 0.010,
+    "smoothing_window": 5
+  },
 
-}
+  "single_leg_stance": {
+    "side": "right",
+    "hold_time_sec": 10.0,
+    "max_trunk_sway_deg": 12.0,
+    "max_hip_sway": 0.05
+  }
