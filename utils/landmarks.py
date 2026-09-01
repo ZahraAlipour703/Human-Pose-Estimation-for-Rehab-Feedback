@@ -1,5 +1,5 @@
 """
-Landmark conversion and fusion utilities.
+Landmark normalization and fusion.
 """
 
 from __future__ import annotations
@@ -10,15 +10,6 @@ from collections.abc import Mapping
 def landmarks_to_dict(
     landmarks,
 ):
-    """
-    Convert landmark representations into:
-
-        {
-            "LEFT_SHOULDER": (x, y, z),
-            ...
-        }
-    """
-
     if landmarks is None:
         return {}
 
@@ -27,7 +18,7 @@ def landmarks_to_dict(
         Mapping,
     ):
 
-        result = {}
+        output = {}
 
         for name, value in (
             landmarks.items()
@@ -52,7 +43,7 @@ def landmarks_to_dict(
                     xyz.append(0.0)
 
                 try:
-                    result[
+                    output[
                         str(name)
                     ] = tuple(
                         float(v)
@@ -64,12 +55,14 @@ def landmarks_to_dict(
                 ):
                     continue
 
-            elif (
+                continue
+
+            if (
                 hasattr(value, "x")
                 and hasattr(value, "y")
             ):
 
-                result[
+                output[
                     str(name)
                 ] = (
                     float(value.x),
@@ -83,68 +76,64 @@ def landmarks_to_dict(
                     ),
                 )
 
-        return result
+        return output
 
-    # MediaPipe Pose landmarks.
     try:
+
         import mediapipe as mp
 
-        pose_landmark_enum = (
+        enum = (
             mp.solutions.pose.PoseLandmark
         )
 
     except Exception as exc:
+
         raise RuntimeError(
-            "Raw MediaPipe landmarks require "
-            "MediaPipe 0.10.x legacy Solutions API."
+            "MediaPipe 0.10.x legacy Solutions API "
+            "is required for raw MediaPipe landmarks."
         ) from exc
 
-    result = {}
+    output = {}
 
-    try:
-        iterator = enumerate(
-            landmarks
+    for index, landmark in enumerate(
+        landmarks
+    ):
+
+        try:
+
+            name = enum(
+                index
+            ).name
+
+        except ValueError:
+
+            continue
+
+        if not (
+            hasattr(
+                landmark,
+                "x",
+            )
+            and hasattr(
+                landmark,
+                "y",
+            )
+        ):
+            continue
+
+        output[name] = (
+            float(landmark.x),
+            float(landmark.y),
+            float(
+                getattr(
+                    landmark,
+                    "z",
+                    0.0,
+                )
+            ),
         )
 
-        for index, landmark in iterator:
-
-            try:
-                name = (
-                    pose_landmark_enum(
-                        index
-                    ).name
-                )
-            except ValueError:
-                continue
-
-            if not (
-                hasattr(
-                    landmark,
-                    "x",
-                )
-                and hasattr(
-                    landmark,
-                    "y",
-                )
-            ):
-                continue
-
-            result[name] = (
-                float(landmark.x),
-                float(landmark.y),
-                float(
-                    getattr(
-                        landmark,
-                        "z",
-                        0.0,
-                    )
-                ),
-            )
-
-    except TypeError:
-        return {}
-
-    return result
+    return output
 
 
 def fuse_landmarks(
@@ -152,22 +141,23 @@ def fuse_landmarks(
     mp_landmarks,
 ):
     """
-    MediaPipe provides the fallback.
-    YOLO/Visolus values override matching keys.
+    Merge YOLO and MediaPipe landmarks.
+
+    MediaPipe is the fallback/base source.
+    YOLO overwrites only the landmarks it provides.
     """
 
-    fused = {}
-
-    fused.update(
-        landmarks_to_dict(
-            mp_landmarks
-        )
+    mp_data = landmarks_to_dict(
+        mp_landmarks
     )
 
-    fused.update(
-        landmarks_to_dict(
-            yolo_landmarks
-        )
+    yolo_data = landmarks_to_dict(
+        yolo_landmarks
     )
+
+    fused = dict(mp_data)
+
+    for name, point in yolo_data.items():
+        fused[name] = point
 
     return fused

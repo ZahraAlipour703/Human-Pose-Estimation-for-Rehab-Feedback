@@ -9,22 +9,26 @@ from pathlib import Path
 import cv2
 import mediapipe as mp
 
-from pose.visolus_adapter import (
-    load_pose_wrapper,
+
+import cv2
+import mediapipe as mp
+
+from pose.yolov8_adapter import (
+    YOLOv8PoseWrapper,
 )
 
 from exercises import (
+    MiniSquatChecker,
+    ShoulderFlexionChecker,
+    ShoulderAbductionChecker,
     BicepsCurlChecker,
     CalfRaiseChecker,
-    MiniSquatChecker,
-    ShoulderAbductionChecker,
-    ShoulderFlexionChecker,
     SingleLegStanceChecker,
 )
 
 from utils.landmarks import (
-    landmarks_to_dict,
     fuse_landmarks,
+    landmarks_to_dict,
 )
 
 from utils.reference_motion import (
@@ -46,23 +50,12 @@ LOG_DIR = (
 
 
 EXERCISE_CHECKERS = {
-    "mini_squat":
-        MiniSquatChecker,
-
-    "shoulder_flexion":
-        ShoulderFlexionChecker,
-
-    "shoulder_abduction":
-        ShoulderAbductionChecker,
-
-    "biceps_curl":
-        BicepsCurlChecker,
-
-    "calf_raise":
-        CalfRaiseChecker,
-
-    "single_leg_stance":
-        SingleLegStanceChecker,
+    "mini_squat": MiniSquatChecker,
+    "shoulder_flexion": ShoulderFlexionChecker,
+    "shoulder_abduction": ShoulderAbductionChecker,
+    "biceps_curl": BicepsCurlChecker,
+    "calf_raise": CalfRaiseChecker,
+    "single_leg_stance": SingleLegStanceChecker,
 }
 
 
@@ -257,16 +250,10 @@ def run_exercise_live(
         # Visolus pose backend
         # ----------------------------
 
-        pose_wrapper = (
-            load_pose_wrapper()
+        pose_wrapper = YOLOv8PoseWrapper(
+            model_path="yolov8n-pose.pt",
+            confidence=0.35,
         )
-
-        if pose_wrapper is None:
-            raise RuntimeError(
-                "Visolus pose backend could not "
-                "be loaded. Expected the Visolus "
-                "backend under pose/external/Visolus."
-            )
 
         if not hasattr(
             pose_wrapper,
@@ -281,13 +268,11 @@ def run_exercise_live(
         # MediaPipe
         # ----------------------------
 
-        pose = (
-            mp.solutions.pose.Pose(
-                static_image_mode=False,
-                model_complexity=1,
-                min_detection_confidence=0.6,
-                min_tracking_confidence=0.6,
-            )
+        pose = mp.solutions.pose.Pose(
+            static_image_mode=False,
+            model_complexity=1,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6,
         )
 
         ref_fn = (
@@ -331,80 +316,66 @@ def run_exercise_live(
                 current_time
             )
 
-            # ------------------------
-            # Visolus / YOLO side
-            # ------------------------
+            # ==========================================================
+            # ==========================================================
+            # YOLO POSE
+            # ==========================================================
 
             try:
-
-                pose_output = (
-                    pose_wrapper.findPose(
-                        frame,
-                        draw=False,
-                    )
-                )
-
-                if isinstance(
-                    pose_output,
-                    tuple,
-                ):
-
-                    if len(
-                        pose_output
-                    ) >= 2:
-                        pose_output = (
-                            pose_output[1]
-                        )
-                    else:
-                        pose_output = {}
-
                 yolo_landmarks = (
-                    landmarks_to_dict(
-                        pose_output
+                    pose_wrapper.predict_landmarks(
+                        frame
                     )
                 )
 
             except Exception:
-
                 yolo_landmarks = {}
 
-            # ------------------------
-            # MediaPipe
-            # ------------------------
+
+            # ==========================================================
+            # MEDIAPIPE POSE
+            # ==========================================================
 
             rgb = cv2.cvtColor(
                 frame,
                 cv2.COLOR_BGR2RGB,
             )
 
-            mp_results = (
-                pose.process(rgb)
+            mp_results = pose.process(
+                rgb
             )
 
-            mp_landmarks = (
-                media_pipe_to_dict(
-                    mp_results
+            if mp_results.pose_landmarks:
+
+                mp_landmarks = (
+                    landmarks_to_dict(
+                        mp_results.pose_landmarks.landmark
+                    )
                 )
-            )
 
-            # ------------------------
-            # Fusion
-            # ------------------------
+            else:
 
-            fused = fuse_landmarks(
+                mp_landmarks = {}
+
+
+            # ==========================================================
+            # FUSION
+            # ==========================================================
+
+            fused_landmarks = fuse_landmarks(
                 yolo_landmarks,
                 mp_landmarks,
             )
 
-            # ------------------------
-            # Exercise
-            # ------------------------
+
+            # ==========================================================
+            # EXERCISE ANALYSIS
+            # ==========================================================
 
             result = checker.update(
-                fused,
+                fused_landmarks,
                 t=time.time(),
             )
-
             # ------------------------
             # Visualization
             # ------------------------
