@@ -1,12 +1,14 @@
 """
-Shoulder abduction assessment.
+Mini squat assessment.
 
-Uses the same anatomical shoulder-elevation geometry as
-the existing system, but is kept as a separate exercise
-because the intended movement plane and reference trajectory
-are different.
+Primary signal:
+    HIP -> KNEE -> ANKLE
 
-Use a frontal camera view for abduction.
+Secondary signal:
+    trunk inclination.
+
+Camera recommendation:
+    frontal or 45-degree view with the full body visible.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import time
 from exercises.base import BaseExerciseChecker
 
 
-class ShoulderAbductionChecker(BaseExerciseChecker):
+class MiniSquatChecker(BaseExerciseChecker):
 
     def __init__(
         self,
@@ -24,35 +26,27 @@ class ShoulderAbductionChecker(BaseExerciseChecker):
         logger=None,
     ):
         super().__init__(
-            "shoulder_abduction",
+            "mini_squat",
             config,
             logger,
         )
 
         c = self.config
 
-        self.target_up = float(
-            c.get("target_angle_up", 160)
+        self.down_knee_angle = float(
+            c.get("down_knee_angle", 85)
         )
 
-        self.target_down = float(
-            c.get("target_angle_down", 25)
+        self.up_knee_angle = float(
+            c.get("up_knee_angle", 155)
         )
 
         self.tolerance = float(
-            c.get("tolerance_deg", 15)
-        )
-
-        self.hold_time = float(
-            c.get("hold_time_sec", 1.0)
-        )
-
-        self.max_elbow_flexion = float(
-            c.get("max_elbow_flexion_deg", 20)
+            c.get("tolerance_deg", 12)
         )
 
         self.max_torso_tilt = float(
-            c.get("max_torso_tilt_deg", 12)
+            c.get("max_torso_tilt_deg", 30)
         )
 
         self.smoothers = self.create_smoothers(
@@ -60,18 +54,13 @@ class ShoulderAbductionChecker(BaseExerciseChecker):
         )
 
         self.stage = {
-            "LEFT": "down",
-            "RIGHT": "down",
+            "LEFT": "up",
+            "RIGHT": "up",
         }
 
         self.reps = {
             "LEFT": 0,
             "RIGHT": 0,
-        }
-
-        self.hold_start = {
-            "LEFT": None,
-            "RIGHT": None,
         }
 
     def _torso_tilt(self, lm):
@@ -124,16 +113,15 @@ class ShoulderAbductionChecker(BaseExerciseChecker):
 
         torso_tilt = self._torso_tilt(lm)
 
-        feedback = []
         per_side = {}
+        feedback = []
 
         for side in self.selected_sides():
 
             names = [
                 f"{side}_HIP",
-                f"{side}_SHOULDER",
-                f"{side}_ELBOW",
-                f"{side}_WRIST",
+                f"{side}_KNEE",
+                f"{side}_ANKLE",
             ]
 
             if not self.has_points(
@@ -149,30 +137,14 @@ class ShoulderAbductionChecker(BaseExerciseChecker):
                 }
                 continue
 
-            hip = lm[f"{side}_HIP"]
-            shoulder = lm[f"{side}_SHOULDER"]
-            elbow = lm[f"{side}_ELBOW"]
-            wrist = lm[f"{side}_WRIST"]
-
-            angle = self.smoothers[
+            knee_angle = self.smoothers[
                 side
             ].update(
                 self.angle(
-                    hip,
-                    shoulder,
-                    elbow,
+                    lm[f"{side}_HIP"],
+                    lm[f"{side}_KNEE"],
+                    lm[f"{side}_ANKLE"],
                 )
-            )
-
-            elbow_angle = self.angle(
-                shoulder,
-                elbow,
-                wrist,
-            )
-
-            elbow_flexion = max(
-                0.0,
-                180.0 - elbow_angle,
             )
 
             reasons = []
@@ -182,57 +154,39 @@ class ShoulderAbductionChecker(BaseExerciseChecker):
                 and torso_tilt > self.max_torso_tilt
             ):
                 reasons.append(
-                    "Keep torso upright"
-                )
-
-            if (
-                elbow_flexion
-                > self.max_elbow_flexion
-            ):
-                reasons.append(
-                    "Keep elbow straighter"
+                    "Reduce forward trunk lean"
                 )
 
             previous = self.stage[side]
 
-            at_down = (
-                angle
-                <= self.target_down
-                + self.tolerance
+            at_bottom = (
+                knee_angle
+                <= (
+                    self.down_knee_angle
+                    + self.tolerance
+                )
             )
 
-            at_up = (
-                angle
-                >= self.target_up
-                - self.tolerance
+            at_top = (
+                knee_angle
+                >= (
+                    self.up_knee_angle
+                    - self.tolerance
+                )
             )
 
-            if at_down:
+            if at_bottom:
                 self.stage[side] = "down"
-                self.hold_start[side] = None
 
-            elif at_up:
-
-                if self.hold_start[side] is None:
-                    self.hold_start[side] = now
-
-                held = (
-                    now
-                    - self.hold_start[side]
-                )
-
-                self.stage[side] = (
-                    "up"
-                    if held >= self.hold_time
-                    else "holding"
-                )
+            elif at_top:
+                self.stage[side] = "up"
 
             else:
                 self.stage[side] = "moving"
 
             if (
-                previous == "up"
-                and self.stage[side] == "down"
+                previous == "down"
+                and self.stage[side] == "up"
             ):
                 self.reps[side] += 1
 
@@ -249,10 +203,7 @@ class ShoulderAbductionChecker(BaseExerciseChecker):
                     if not reasons
                     else "form_warning"
                 ),
-                "angle": float(angle),
-                "elbow_flexion": float(
-                    elbow_flexion
-                ),
+                "angle": float(knee_angle),
                 "reps": self.reps[side],
                 "stage": self.stage[side],
                 "reasons": reasons,
