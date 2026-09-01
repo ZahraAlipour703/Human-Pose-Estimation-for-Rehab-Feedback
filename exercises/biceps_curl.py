@@ -1,14 +1,12 @@
 """
-Mini squat assessment.
+Biceps curl exercise checker.
 
-Primary signal:
-    HIP -> KNEE -> ANKLE
+Measures elbow flexion/extension using:
 
-Secondary signal:
-    trunk inclination.
+    SHOULDER -> ELBOW -> WRIST
 
-Camera recommendation:
-    frontal or 45-degree view with the full body visible.
+The checker uses hysteresis-style thresholds so small
+frame-to-frame fluctuations do not create repeated counts.
 """
 
 from __future__ import annotations
@@ -18,7 +16,8 @@ import time
 from exercises.base import BaseExerciseChecker
 
 
-class MiniSquatChecker(BaseExerciseChecker):
+class BicepsCurlChecker(BaseExerciseChecker):
+    """Evaluate repeated elbow flexion and extension."""
 
     def __init__(
         self,
@@ -26,36 +25,42 @@ class MiniSquatChecker(BaseExerciseChecker):
         logger=None,
     ):
         super().__init__(
-            "mini_squat",
+            "biceps_curl",
             config,
             logger,
         )
 
-        c = self.config
+        config = config or {}
 
-        self.down_knee_angle = float(
-            c.get("down_knee_angle", 85)
+        self.flexion_angle = float(
+            config.get("flexion_angle", 55.0)
         )
 
-        self.up_knee_angle = float(
-            c.get("up_knee_angle", 155)
+        self.extension_angle = float(
+            config.get("extension_angle", 155.0)
         )
 
         self.tolerance = float(
-            c.get("tolerance_deg", 12)
+            config.get("tolerance_deg", 12.0)
         )
 
-        self.max_torso_tilt = float(
-            c.get("max_torso_tilt_deg", 30)
+        self.max_shoulder_motion = float(
+            config.get(
+                "max_shoulder_motion",
+                0.06,
+            )
         )
 
         self.smoothers = self.create_smoothers(
-            c.get("smoothing_window", 5)
+            config.get(
+                "smoothing_window",
+                5,
+            )
         )
 
         self.stage = {
-            "LEFT": "up",
-            "RIGHT": "up",
+            "LEFT": "extended",
+            "RIGHT": "extended",
         }
 
         self.reps = {
@@ -63,33 +68,31 @@ class MiniSquatChecker(BaseExerciseChecker):
             "RIGHT": 0,
         }
 
-    def _torso_tilt(self, lm):
-        names = [
-            "LEFT_SHOULDER",
-            "RIGHT_SHOULDER",
-            "LEFT_HIP",
-            "RIGHT_HIP",
-        ]
+        self.baseline_shoulder = {
+            "LEFT": None,
+            "RIGHT": None,
+        }
 
-        if not self.has_points(
-            lm,
-            names,
-        ):
-            return None
+        self.baseline_upper_arm_length = {
+            "LEFT": None,
+            "RIGHT": None,
+        }
 
-        shoulder_mid = self.midpoint(
-            lm["LEFT_SHOULDER"],
-            lm["RIGHT_SHOULDER"],
-        )
-
-        hip_mid = self.midpoint(
-            lm["LEFT_HIP"],
-            lm["RIGHT_HIP"],
-        )
-
-        return self.vertical_tilt_deg(
-            shoulder_mid,
-            hip_mid,
+    def _upper_arm_length(
+        self,
+        landmarks,
+        side,
+    ):
+        return max(
+            self.distance(
+                landmarks[
+                    f"{side}_SHOULDER"
+                ],
+                landmarks[
+                    f"{side}_ELBOW"
+                ],
+            ),
+            1e-6,
         )
 
     def update(
@@ -97,7 +100,6 @@ class MiniSquatChecker(BaseExerciseChecker):
         landmarks,
         t=None,
     ):
-
         now = (
             float(t)
             if t is not None
@@ -111,22 +113,20 @@ class MiniSquatChecker(BaseExerciseChecker):
         if not lm:
             return self.no_pose_result()
 
-        torso_tilt = self._torso_tilt(lm)
-
-        per_side = {}
         feedback = []
+        per_side = {}
 
         for side in self.selected_sides():
 
-            names = [
-                f"{side}_HIP",
-                f"{side}_KNEE",
-                f"{side}_ANKLE",
+            required = [
+                f"{side}_SHOULDER",
+                f"{side}_ELBOW",
+                f"{side}_WRIST",
             ]
 
             if not self.has_points(
                 lm,
-                names,
+                required,
             ):
                 per_side[side] = {
                     "status": "no_pose",
@@ -137,56 +137,103 @@ class MiniSquatChecker(BaseExerciseChecker):
                 }
                 continue
 
-            knee_angle = self.smoothers[
+            shoulder = lm[
+                f"{side}_SHOULDER"
+            ]
+
+            elbow = lm[
+                f"{side}_ELBOW"
+            ]
+
+            wrist = lm[
+                f"{side}_WRIST"
+            ]
+
+            elbow_angle = self.smoothers[
                 side
             ].update(
                 self.angle(
-                    lm[f"{side}_HIP"],
-                    lm[f"{side}_KNEE"],
-                    lm[f"{side}_ANKLE"],
+                    shoulder,
+                    elbow,
+                    wrist,
                 )
+            )
+
+            if (
+                self.baseline_shoulder[
+                    side
+                ]
+                is None
+            ):
+                self.baseline_shoulder[
+                    side
+                ] = shoulder
+
+            if (
+                self.baseline_upper_arm_length[
+                    side
+                ]
+                is None
+            ):
+                self.baseline_upper_arm_length[
+                    side
+                ] = self._upper_arm_length(
+                    lm,
+                    side,
+                )
+
+            shoulder_motion = (
+                self.distance(
+                    shoulder,
+                    self.baseline_shoulder[
+                        side
+                    ],
+                )
+                / self.baseline_upper_arm_length[
+                    side
+                ]
             )
 
             reasons = []
 
             if (
-                torso_tilt is not None
-                and torso_tilt > self.max_torso_tilt
+                shoulder_motion
+                > self.max_shoulder_motion
             ):
                 reasons.append(
-                    "Reduce forward trunk lean"
+                    "Keep upper arm stable"
                 )
 
-            previous = self.stage[side]
-
-            at_bottom = (
-                knee_angle
-                <= (
-                    self.down_knee_angle
-                    + self.tolerance
-                )
+            previous_stage = (
+                self.stage[side]
             )
 
-            at_top = (
-                knee_angle
-                >= (
-                    self.up_knee_angle
-                    - self.tolerance
-                )
+            flexed_limit = (
+                self.flexion_angle
+                + self.tolerance
             )
 
-            if at_bottom:
-                self.stage[side] = "down"
+            extended_limit = (
+                self.extension_angle
+                - self.tolerance
+            )
 
-            elif at_top:
-                self.stage[side] = "up"
+            if elbow_angle <= flexed_limit:
+                self.stage[side] = "flexed"
+
+            elif (
+                elbow_angle
+                >= extended_limit
+            ):
+                self.stage[side] = "extended"
 
             else:
                 self.stage[side] = "moving"
 
+            # One repetition = flexed -> extended.
             if (
-                previous == "down"
-                and self.stage[side] == "up"
+                previous_stage == "flexed"
+                and self.stage[side] == "extended"
             ):
                 self.reps[side] += 1
 
@@ -203,7 +250,12 @@ class MiniSquatChecker(BaseExerciseChecker):
                     if not reasons
                     else "form_warning"
                 ),
-                "angle": float(knee_angle),
+                "angle": float(
+                    elbow_angle
+                ),
+                "shoulder_motion": float(
+                    shoulder_motion
+                ),
                 "reps": self.reps[side],
                 "stage": self.stage[side],
                 "reasons": reasons,
@@ -213,11 +265,11 @@ class MiniSquatChecker(BaseExerciseChecker):
 
         return self.standard_result(
             status="active",
-            reps=max(self.reps.values()),
+            reps=max(
+                self.reps.values()
+            ),
             stage="active",
             feedback=feedback,
-            metrics={
-                "torso_tilt_deg": torso_tilt
-            },
+            metrics={},
             per_side=per_side,
         )

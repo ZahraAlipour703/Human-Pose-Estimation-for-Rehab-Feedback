@@ -37,7 +37,8 @@
   "max_torso_tilt_deg": 12
 }
 
-
+"BicepsCurlChecker" is not accessedPylance
+(import) BicepsCurlChecker: Any
 
 
 }
