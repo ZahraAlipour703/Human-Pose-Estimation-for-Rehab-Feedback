@@ -7,15 +7,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 
-def landmarks_to_dict(landmarks):
+def landmarks_to_dict(
+    landmarks,
+):
     """
-    Convert:
-
-        MediaPipe landmarks
-        OR
-        existing mapping
-
-    into:
+    Convert landmark representations into:
 
         {
             "LEFT_SHOULDER": (x, y, z),
@@ -30,9 +26,12 @@ def landmarks_to_dict(landmarks):
         landmarks,
         Mapping,
     ):
+
         result = {}
 
-        for name, value in landmarks.items():
+        for name, value in (
+            landmarks.items()
+        ):
 
             if value is None:
                 continue
@@ -45,25 +44,34 @@ def landmarks_to_dict(landmarks):
                 if len(value) < 2:
                     continue
 
-                xyz = list(value[:3])
-
-                if len(xyz) == 2:
-                    xyz.append(0.0)
-
-                result[str(name)] = tuple(
-                    float(v)
-                    for v in xyz
+                xyz = list(
+                    value[:3]
                 )
 
-            elif hasattr(
-                value,
-                "x",
-            ) and hasattr(
-                value,
-                "y",
+                while len(xyz) < 3:
+                    xyz.append(0.0)
+
+                try:
+                    result[
+                        str(name)
+                    ] = tuple(
+                        float(v)
+                        for v in xyz
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    continue
+
+            elif (
+                hasattr(value, "x")
+                and hasattr(value, "y")
             ):
 
-                result[str(name)] = (
+                result[
+                    str(name)
+                ] = (
                     float(value.x),
                     float(value.y),
                     float(
@@ -77,39 +85,64 @@ def landmarks_to_dict(landmarks):
 
         return result
 
+    # MediaPipe Pose landmarks.
     try:
         import mediapipe as mp
-    except ImportError as exc:
+
+        pose_landmark_enum = (
+            mp.solutions.pose.PoseLandmark
+        )
+
+    except Exception as exc:
         raise RuntimeError(
-            "MediaPipe is required to convert raw pose landmarks."
+            "Raw MediaPipe landmarks require "
+            "MediaPipe 0.10.x legacy Solutions API."
         ) from exc
 
     result = {}
 
-    for index, lm in enumerate(
-        landmarks
-    ):
-
-        try:
-            name = (
-                mp.solutions.pose.PoseLandmark(
-                    index
-                ).name
-            )
-        except ValueError:
-            continue
-
-        result[name] = (
-            float(lm.x),
-            float(lm.y),
-            float(
-                getattr(
-                    lm,
-                    "z",
-                    0.0,
-                )
-            ),
+    try:
+        iterator = enumerate(
+            landmarks
         )
+
+        for index, landmark in iterator:
+
+            try:
+                name = (
+                    pose_landmark_enum(
+                        index
+                    ).name
+                )
+            except ValueError:
+                continue
+
+            if not (
+                hasattr(
+                    landmark,
+                    "x",
+                )
+                and hasattr(
+                    landmark,
+                    "y",
+                )
+            ):
+                continue
+
+            result[name] = (
+                float(landmark.x),
+                float(landmark.y),
+                float(
+                    getattr(
+                        landmark,
+                        "z",
+                        0.0,
+                    )
+                ),
+            )
+
+    except TypeError:
+        return {}
 
     return result
 
@@ -119,21 +152,22 @@ def fuse_landmarks(
     mp_landmarks,
 ):
     """
-    Merge two named landmark dictionaries.
-
-    MediaPipe acts as the fallback source.
-    YOLO values take priority when present.
+    MediaPipe provides the fallback.
+    YOLO/Visolus values override matching keys.
     """
 
-    yolo = landmarks_to_dict(
-        yolo_landmarks
+    fused = {}
+
+    fused.update(
+        landmarks_to_dict(
+            mp_landmarks
+        )
     )
 
-    mp_data = landmarks_to_dict(
-        mp_landmarks
+    fused.update(
+        landmarks_to_dict(
+            yolo_landmarks
+        )
     )
-
-    fused = dict(mp_data)
-    fused.update(yolo)
 
     return fused
