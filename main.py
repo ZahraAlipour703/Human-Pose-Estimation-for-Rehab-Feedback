@@ -2,7 +2,7 @@ import json, os, time
 import numpy as np
 from utils.landmarks import landmarks_to_dict
 from utils.angles import angle_between_3d
-from visolus_adapter import PoseEstimator
+from pose.visolus_adapter import load_pose_wrapper
 
 CFG_PATH = "config.json"
 RECORD_SECONDS = 20   # how long to record (patient should do ~10 good reps)

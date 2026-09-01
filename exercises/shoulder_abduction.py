@@ -1,12 +1,12 @@
 """
-Shoulder flexion assessment.
+Shoulder abduction assessment.
 
-The main geometric signal is the angle between:
+Uses the same anatomical shoulder-elevation geometry as
+the existing system, but is kept as a separate exercise
+because the intended movement plane and reference trajectory
+are different.
 
-    hip -> shoulder -> elbow
-
-This is an image-based movement metric and should not be
-interpreted as a clinical goniometric measurement.
+Use a frontal camera view for abduction.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import time
 from exercises.base import BaseExerciseChecker
 
 
-class ShoulderFlexionChecker(BaseExerciseChecker):
+class ShoulderAbductionChecker(BaseExerciseChecker):
 
     def __init__(
         self,
@@ -24,7 +24,7 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
         logger=None,
     ):
         super().__init__(
-            "shoulder_flexion",
+            "shoulder_abduction",
             config,
             logger,
         )
@@ -36,7 +36,7 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
         )
 
         self.target_down = float(
-            c.get("target_angle_down", 40)
+            c.get("target_angle_down", 25)
         )
 
         self.tolerance = float(
@@ -75,7 +75,7 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
         }
 
     def _torso_tilt(self, lm):
-        required = [
+        names = [
             "LEFT_SHOULDER",
             "RIGHT_SHOULDER",
             "LEFT_HIP",
@@ -84,7 +84,7 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
 
         if not self.has_points(
             lm,
-            required,
+            names,
         ):
             return None
 
@@ -154,15 +154,15 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
             elbow = lm[f"{side}_ELBOW"]
             wrist = lm[f"{side}_WRIST"]
 
-            raw_angle = self.angle(
-                hip,
-                shoulder,
-                elbow,
-            )
-
             angle = self.smoothers[
                 side
-            ].update(raw_angle)
+            ].update(
+                self.angle(
+                    hip,
+                    shoulder,
+                    elbow,
+                )
+            )
 
             elbow_angle = self.angle(
                 shoulder,
@@ -182,7 +182,7 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
                 and torso_tilt > self.max_torso_tilt
             ):
                 reasons.append(
-                    "Reduce torso lean"
+                    "Keep torso upright"
                 )
 
             if (
@@ -195,22 +195,16 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
 
             previous = self.stage[side]
 
-            down_limit = (
-                self.target_down
+            at_down = (
+                angle
+                <= self.target_down
                 + self.tolerance
             )
 
-            up_limit = (
-                self.target_up
-                - self.tolerance
-            )
-
-            at_down = (
-                angle <= down_limit
-            )
-
             at_up = (
-                angle >= up_limit
+                angle
+                >= self.target_up
+                - self.tolerance
             )
 
             if at_down:
@@ -227,16 +221,15 @@ class ShoulderFlexionChecker(BaseExerciseChecker):
                     - self.hold_start[side]
                 )
 
-                if held >= self.hold_time:
-                    self.stage[side] = "up"
-                else:
-                    self.stage[side] = "holding"
+                self.stage[side] = (
+                    "up"
+                    if held >= self.hold_time
+                    else "holding"
+                )
 
             else:
                 self.stage[side] = "moving"
 
-            # A completed repetition is:
-            # UP -> DOWN.
             if (
                 previous == "up"
                 and self.stage[side] == "down"

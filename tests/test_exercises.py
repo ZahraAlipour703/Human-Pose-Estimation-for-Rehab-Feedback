@@ -10,6 +10,15 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from exercises import (
+    BicepsCurlChecker,
+    CalfRaiseChecker,
+    MiniSquatChecker,
+    ShoulderAbductionChecker,
+    ShoulderFlexionChecker,
+    SingleLegStanceChecker,
+)
+
 from run_local import (
     EXERCISE_CHECKERS,
     EXERCISE_TITLES,
